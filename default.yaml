@@ -1,0 +1,71 @@
+# Example to use Docker instead of containerd & nerdctl
+# $ limactl start ./default.yaml
+# $ limactl shell docker docker run -it -v $HOME:$HOME --rm alpine
+
+# Hint: To allow `docker` CLI on the host to connect to the Docker daemon running inside the guest,
+# $ export DOCKER_HOST=tcp://127.0.0.1:2375
+# $ docker ...
+
+# If ssh:// ... does not work, try the following commands:
+# $ ssh -f -N -p 60006 -i ~/.lima/_config/user -o NoHostAuthenticationForLocalhost=yes -L $HOME/docker.sock:/run/user/$(id -u)/docker.sock 127.0.0.1
+# $ export DOCKER_HOST=unix://$HOME/docker.sock
+# $ docker ...
+
+images:
+  # Hint: run `limactl prune` to invalidate the "current" cache
+  - location: "https://cloud-images.ubuntu.com/hirsute/current/hirsute-server-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/hirsute/current/hirsute-server-cloudimg-arm64.img"
+    arch: "aarch64"
+mounts:
+  - location: "~"
+    writable: false
+  - location: "/tmp/lima"
+    writable: true
+ssh:
+  localPort: 60006
+  # Load ~/.ssh/*.pub in addition to $LIMA_HOME/_config/user.pub , for allowing DOCKER_HOST=ssh:// .
+  # This option is enabled by default.
+  # If you have an insecure key under ~/.ssh, do not use this option.
+  loadDotSSHPubKeys: true
+# containerd is managed by Docker, not by Lima, so the values are set to false here.
+containerd:
+  system: false
+  user: false
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      command -v docker >/dev/null 2>&1 && exit 0
+      export DEBIAN_FRONTEND=noninteractive
+      curl -fsSL https://get.docker.com | sh
+      apt install -y docker-compose qemu-system-x86 binfmt-support qemu-user qemu-user-static
+
+      mkdir -p /etc/docker/
+      cat << EOS >> /etc/docker/daemon.json
+      {"hosts": ["tcp://127.0.0.1:2375", "unix:///var/run/docker.sock"]}
+      EOS
+
+      mkdir -p /etc/systemd/system/docker.service.d/
+      cat << EOS >> /etc/systemd/system/docker.service.d/override.conf
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/dockerd
+      EOS
+
+      systemctl daemon-reload
+      systemctl restart docker.service
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+probes:
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 30s bash -c "until command -v docker >/dev/null 2>&1; do sleep 3; done"; then
+        echo >&2 "docker is not installed yet"
+        exit 1
+      fi
+    hint: See "/var/log/cloud-init-output.log". in the guest
