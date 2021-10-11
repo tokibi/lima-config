@@ -11,6 +11,7 @@
 # $ export DOCKER_HOST=unix://$HOME/docker.sock
 # $ docker ...
 
+cpus: 2
 images:
   # Hint: run `limactl prune` to invalidate the "current" cache
   - location: "https://cloud-images.ubuntu.com/hirsute/current/hirsute-server-cloudimg-amd64.img"
